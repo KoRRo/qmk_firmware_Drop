@@ -127,3 +127,72 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
             return true; //Process all other keycodes normally
     }
 }
+
+// ---- Evidenziazione dei tasti per layer ----
+
+enum korro_key_type { KT_NONE, KT_RGB, KT_SYS, KT_NAV, KT_LAYER, KT_GAME };
+
+// Rotazione di tinta rispetto a quella scelta (0-255 = 0-360 gradi),
+// nello stesso ordine dell'enum qui sopra
+static const uint8_t korro_hue_offset[] = {
+    0,    // KT_NONE   (non usato)
+    43,   // KT_RGB    controlli luci
+    171,  // KT_SYS    bootloader, NKRO, debug, USB, Stamp/Scorr/Pausa
+    85,   // KT_NAV    Home, Fine, Pag su/giu
+    213,  // KT_LAYER  cambio layer
+    64,   // KT_GAME   WASD nel layer 2
+};
+
+static uint8_t korro_key_type(uint8_t layer, uint16_t kc) {
+    if (layer == 2) {
+        switch (kc) {
+            case KC_W: case KC_A: case KC_S: case KC_D:
+                return KT_GAME;
+            default:
+                return KT_NONE;
+        }
+    }
+    switch (kc) {
+        case RGB_TOG: case RGB_MOD: case RGB_RMOD:
+        case RGB_HUI: case RGB_HUD: case RGB_SAI: case RGB_SAD:
+        case RGB_VAI: case RGB_VAD: case RGB_SPI: case RGB_SPD:
+            return KT_RGB;
+        case MD_BOOT: case NK_TOGG: case DBG_TOG: case DBG_MTRX:
+        case DBG_KBD: case DBG_MOU: case U_T_AUTO: case U_T_AGCR:
+        case KC_PSCR: case KC_SCRL: case KC_PAUS:
+            return KT_SYS;
+        case KC_HOME: case KC_END: case KC_PGUP: case KC_PGDN:
+            return KT_NAV;
+        case TO(0): case TO(1): case TO(2): case TO(3):
+            return KT_LAYER;
+        default:
+            return KT_NONE;
+    }
+}
+
+bool rgb_matrix_indicators_advanced_user(uint8_t led_min, uint8_t led_max) {
+    uint8_t layer = get_highest_layer(layer_state);
+    if (layer == 0) {
+        return true;
+    }
+    HSV     base  = { rgb_matrix_get_hue(), rgb_matrix_get_sat(), rgb_matrix_get_val() };
+    uint8_t flags = rgb_matrix_get_flags();
+
+    for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
+        for (uint8_t col = 0; col < MATRIX_COLS; col++) {
+            uint8_t led = g_led_config.matrix_co[row][col];
+            if (led == NO_LED || led < led_min || led >= led_max) continue;
+            if (!(g_led_config.flags[led] & flags)) continue;
+
+            uint16_t kc   = keymap_key_to_keycode(layer, (keypos_t){ .row = row, .col = col });
+            uint8_t  type = korro_key_type(layer, kc);
+            if (type == KT_NONE) continue;
+
+            HSV hsv = base;
+            hsv.h += korro_hue_offset[type];
+            RGB rgb = hsv_to_rgb(hsv);
+            rgb_matrix_set_color(led, rgb.r, rgb.g, rgb.b);
+        }
+    }
+    return true;  // lascia girare l'indicatore Caps Lock del firmware
+}
